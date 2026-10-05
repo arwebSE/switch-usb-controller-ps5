@@ -34,16 +34,16 @@ Pioneering projects were developed and tested almost exclusively on legacy firmw
 
 ### C. USB Dongle & Wired Cable Support
 * **The Problem:** Earlier payloads exclusively targeted Bluetooth. If a battery died or a player wanted to connect a 2.4GHz wireless dongle (e.g. Machenike G5 Pro Max SE, 8BitDo) or a wired USB controller (Xbox, Switch Pro, DS3), the payload could not recognize it.
-* **OmniPad's Solution:** A dynamic 250Hz USB Hotplug engine. Wireless Bluetooth and wired/2.4G USB devices coexist simultaneously across independent virtual slots.
+* **OmniPad's Solution:** A dynamic 250Hz USB Hotplug engine. In **v1.0.4**, 2.4GHz wireless USB dongles (Machenike, 8BitDo) and wired USB controllers (Switch Pro, DualShock 4, DualShock 3, Xbox, PC HID) operate at 4ms latency across independent virtual slots, with direct console Bluetooth pairing scheduled for **v1.1.0**.
 
 ---
 
 ## 3. Communication & Privilege Architecture
 
 ```text
-[ Controller ] ─── (USB Cable / 2.4G Dongle) ────┐
-                                                 ├───► [ OmniPad PS5 Core ]
-[ Controller ] ─── (Native Bluetooth) ──────────┘           │
+[ Controller ] ─── (USB Cable / 2.4G USB Dongle - Active v1.0.4) ────┐
+                                                                      ├───► [ OmniPad PS5 Core ]
+[ Controller ] ─── (Console Internal Bluetooth - Roadmap v1.1.0) ────┘           │
                                                              │ 1. ucred privilege elevation
                                                              │ 2. ScePad Virtual Device creation (Type 3)
                                                              │ 3. Kernel log (/dev/klog) DeviceId matching

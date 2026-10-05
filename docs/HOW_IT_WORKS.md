@@ -12,15 +12,15 @@ The engine is organized into **6 core layers**:
 ```
  ┌─────────────────────────────────────────────────────────────┐
  │                      1. INPUT SOURCES                       │
- │   • 2.4GHz Dongles & USB Cables (Machenike, Switch, XInput) │
- │   • Bluetooth Gamepads (DS4, Xbox, Switch Pro, 8BitDo)      │
+ │   • 2.4GHz Dongles & USB Cables (Active in v1.0.4)          │
+ │   • Console Internal Bluetooth (Roadmap for v1.1.0)         │
  │   • Local Network Injections (TCP Stream Port 9045)         │
  └──────────────────────────────┬──────────────────────────────┘
                                 │
  ┌──────────────────────────────▼──────────────────────────────┐
  │              2. HARDWARE & DRIVER LAYER                     │
- │   • bt_hci_usb.c (Dynamic FreeBSD /dev/ugen*.* Scanner)     │
  │   • usb_hotplug.c (Dynamic Hotplug Monitor + Wake Packets)  │
+ │   • bt_hci_usb.c (Dynamic /dev/ugen*.* Scanner - Roadmap)   │
  └──────────────────────────────┬──────────────────────────────┘
                                 │
  ┌──────────────────────────────▼──────────────────────────────┐
@@ -61,24 +61,24 @@ The engine is organized into **6 core layers**:
 4. A dedicated asynchronous thread polls the IN interrupt endpoint at **250 Hz** (~4ms latency).
 
 #### B. Wireless Bluetooth (Console's Internal Radio — Roadmap / v1.1.0)
-> ⚠️ **Roadmap Notice:** Direct HCI access to the console's internal Bluetooth radio is in development for **v1.1.0** to ensure 100% hardware safety and prevent radio firmware desync. In **v1.0.4**, USB-based wireless adapters and wired connections are active.
+> ⚠️ **Roadmap Notice:** In **v1.0.4**, direct Bluetooth communication via the console's internal radio is intentionally dormant in `main.c` while the BLE SMP cryptographic handshake is being completed. Direct pairing through the console antenna is scheduled for **v1.1.0**. In v1.0.4, all wireless gaming is handled through physical USB adapters (e.g. 8BitDo or manufacturer 2.4GHz dongles).
 1. The PS5 motherboard hosts an internal Bluetooth radio chip connected via an internal USB interface.
-2. The `bt_hci_usb.c` module scans `/dev/ugen*.*` nodes, matching class `0xE0:0x01:0x01` (Wireless Bluetooth HCI).
-3. The engine communicates over HCI/L2CAP, decoding raw radio frames transmitted over the air.
+2. The `bt_hci_usb.c` module dynamically scans `/dev/ugen*.*` nodes, matching class `0xE0:0x01:0x01` (Wireless Bluetooth HCI).
+3. The upcoming v1.1.0 engine will communicate over HCI/L2CAP and BLE SMP, decoding radio frames over the air.
 
 ---
 
 ### Step 2: Canonical Normalization (`pad_state_t`)
 
 Different manufacturers arrange button bits, analog sticks, and triggers in incompatible binary formats:
-- **DualShock 4:** 64-byte report with digital buttons packed into 4-bit nibbles.
-- **Xbox XInput:** 20-byte report with 16-bit signed analog axes (-32768 to +32767).
-- **Nintendo Switch Pro:** Compact 12-bit packed analog coordinates.
+- **DualShock 4:** 64-byte USB report with digital buttons packed into 4-bit nibbles.
+- **Xbox (XInput & GIP):** 20-byte report for Xbox 360 / clones, and 18+ byte GIP reports (`0x20` / Guide `0x07`) for wired Xbox One / Series X|S.
+- **Nintendo Switch Pro:** Compact 12-bit packed analog coordinates over 64-byte USB report after handshake.
 
 The `profiles.c` and `usb_controllers.c` modules decode and normalize these reports into a uniform canonical structure:
 - **Analog Sticks:** 0 to 255 (with 128 as the exact mechanical center).
 - **Triggers (L2/R2):** 0 to 255 (0 = released, 255 = fully depressed).
-- **Bitmask:** Uniform mapping across Cross, Circle, Square, Triangle, D-Pad, L1, R1, L3, R3, Options, Create/Share, Touchpad, and PS button.
+- **Bitmask:** Uniform mapping across Cross, Circle, Square, Triangle, D-Pad, L1, R1, L3, R3, Options, Create/Share, Touchpad click, and PS button.
 
 ---
 
@@ -147,7 +147,7 @@ Once bound to a player slot, the main loop injects state packets at **250 Hz** (
 ```c
 scePadVirtualDeviceInsertData(handle, &pad_data);
 ```
-Games and emulators receive the inputs directly from the kernel, recognizing your Machenike, 8BitDo, Xbox, or Switch controller with the responsiveness of a native DualSense.
+Games and emulators receive the inputs directly from the kernel, recognizing your Machenike dongle, 8BitDo adapter, or wired USB controller (Xbox, Switch Pro, DualShock) with the responsiveness of a native DualSense.
 
 ---
 
@@ -155,7 +155,7 @@ Games and emulators receive the inputs directly from the kernel, recognizing you
 
 An embedded zero-dependency HTTP server serves the dashboard:
 - **`GET /`**: Glassmorphism Dark UI for smartphone, PC, or console browsers.
-- **`GET /api/status`**: JSON telemetry for all virtual slots, battery levels, and connection types.
-- **`POST /api/pair`**: Reserved endpoint for the upcoming v1.1.0 Bluetooth pairing window (currently responds with USB Plug & Play status).
+- **`GET /api/status`**: JSON telemetry for all virtual slots, power telemetry, and connection types.
+- **`POST /api/pair`**: Reserved endpoint for the upcoming v1.1.0 Bluetooth pairing window (currently reports USB Plug & Play status).
 - **`POST /api/press_ps`**: Remotely triggers the PS button to open profile selection or wake the console.
 - **`POST /api/disconnect`**: Frees a specific slot on demand.

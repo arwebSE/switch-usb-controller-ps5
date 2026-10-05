@@ -14,14 +14,25 @@
 
 ---
 
-## 📌 Overview
+## 📌 Motivation & The Origin Story
 
-**OmniPad PS5** is a native C low-level controller subsystem and multiplexer for jailbroken PlayStation 5 consoles.
+> 💬 *"Honestly? This whole project started because I was just a guy who wanted his **Machenike G5 Pro Max SE** controller working on his PS5."*
 
-In version **v1.0.4**, OmniPad PS5 provides **dynamic 250Hz USB Hotplug** for 2.4GHz wireless dongles and USB wired cables (with direct internal Bluetooth pairing under active development for v1.1.0), while resolving the user profile assignment block (`0x803B0006`) on modern firmwares up to **FW 13.60** (tested and verified on `kstuff-1.13-fpkg-dr-test5` and `shadowmountplus v1.7 Beta 4`).
+I wanted to play 3-player and 4-player local games on my jailbroken PS5 (running FW 13.60 with `kstuff` and `shadowmountplus`). However, existing community tools either lacked 2.4GHz USB dongle hotplug support or broke on FW 13.60's user profile assignment screen (`0x803B0006`).
 
-### 💡 Motivation
-Created to solve a real hardware pain point: connecting a 3rd player controller (a **Machenike G5 Pro Max SE** with a 2.4GHz USB dongle) on **PS5 FW 13.60** running **kstuff-1.13-fpkg-dr-test5** and **shadowmountplus v1.7 Beta 4**. Existing tools either lacked USB 2.4G hotplug support or failed during user assignment on newer firmwares. OmniPad PS5 bridges these gaps into a single, cohesive engine.
+**OmniPad PS5** is the result of solving that exact problem: building a low-level C subsystem for jailbroken PlayStation 5 consoles that provides **dynamic 250Hz USB Hotplug** (4ms polling) for 2.4G dongles and wired cables, while safely bypassing the profile assignment block.
+
+---
+
+## 🙏 Standing on the Shoulders of Giants (Credits & Origins)
+
+This project is an open-source consolidation, enhancement, and evolution built directly upon pioneering research and code shared by talented developers across the PS5 homebrew community. Sincere gratitude and foundational credit belong to:
+
+- 🎮 **sinfiltros**: Creator of [AnyPad-PS5](https://github.com/sinfiltros/AnyPad-PS5) — laid the groundwork for `libScePad` virtual DualSense emulation and native Bluetooth HCI/L2CAP research.
+- 🔌 **StonedModder / a-ddr**: Authors of [PoorDS4](https://github.com/a-ddr/PoorDS4) and Ghostcontrol — provided vital reference implementations for USB HID parsing, controller wake-up handshakes (Switch Pro, DS3), and asynchronous FreeBSD `/dev/ugen` polling.
+- 💉 **MegaCadeDev**: Author of [YetAnotherControllerEnabler](https://github.com/MegaCadeDev/YetAnotherControllerEnabler) — pioneering research into `SceShellUI` ptrace code cave injection to overcome the `0x803B0006` profile assignment screen.
+- 🛠️ **ChendoChap, SpecterDev, flatz & ps5-payload-sdk contributors**: Authors of the `ps5-payload-sdk`, `kstuff`, and kernel debugging tools making native C payloads possible.
+- 🚀 **LightningMods & etaHEN Team**: For their tireless dedication to the PS5 homebrew ecosystem.
 
 ---
 
@@ -78,18 +89,48 @@ graph TD
 
 ---
 
-## 🕹️ Supported Controllers (v1.0.4)
+## 🕹️ Controller Compatibility & Hardware Testing Status (v1.0.4)
 
-- **Machenike / ShanWan:** G5 Pro / G5 Pro Max SE (2.4GHz Dongle & Wired USB-C).
-- **8BitDo:** Wireless USB Adapter v1/v2, Ultimate 2.4G, SN30 Pro, Pro 2 (via USB / Dongle).
-- **Microsoft:** Xbox Series X|S, Xbox One, Xbox Elite 2, Xbox 360 (Wired USB & Wireless via 2.4G/USB Adapter; Direct BT in v1.1.0).
-- **Nintendo:** Switch Pro Controller (Wired USB-C with native handshake; Direct BT in v1.1.0).
-- **Sony:** DualShock 4 (Wired Micro-USB; Direct BT in v1.1.0), DualShock 3 (USB with wake magic packet).
-- **Generic:** Standard PC USB / HID gamepads (Logitech, EasySMX, GameSir, etc.).
+> 🔬 **Developer Hardware Testing Disclosure:**
+> OmniPad PS5 is maintained by an independent solo developer. Currently, the developer physically owns and tests on a **Machenike G5 Pro Max SE** (2.4GHz USB Dongle & USB-C Cable).
+> 
+> Support for **Xbox Series X\|S, Xbox One, DualShock 4, DualShock 3, and Switch Pro** was written based on official USB HID/GIP specifications, reference open-source drivers, and automated test suites. Because physical hardware was not on the developer's test bench during initial release, **these decoders are currently considered EXPERIMENTAL**. If you own these controllers, your testing reports and feedback are warmly welcomed to help fine-tune and verify them!
 
-> 📡 **Direct Internal Bluetooth:** Pairing directly through the console's internal antenna without a USB adapter is currently under active development and scheduled for **v1.1.0** to ensure full hardware safety and radio stability.
+> ⚠️ **Important Connection Notice (v1.0.4):**
+> OmniPad PS5 v1.0.4 operates **exclusively via USB ports** (physical USB cables and supported 2.4GHz USB wireless dongles). **Direct wireless Bluetooth pairing through the console's internal antenna is currently in active development for v1.1.0 and is NOT active in v1.0.4.**
 
-*For the comprehensive compatibility table, see [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md).*
+| Controller Brand | Supported Connection (v1.0.4) | Hardware Testing Status | Notes |
+|---|---|:---:|---|
+| **Machenike G5 Pro / G5 Pro Max SE** | Bundled 2.4GHz USB Dongle or USB-C Cable | 🟢 **Verified on PS5 Hardware** | Fully tested & verified in real 3-player gameplay on FW 13.60. Plug & play at 250Hz. |
+| **Microsoft Xbox Series X\|S & Xbox One** | Physical USB-C / Micro-USB Cable **OR** 8BitDo USB Adapter | 🟡 **Experimental (Spec-Implemented)** | Decodes GIP `0x20` input & `0x07` Guide packets via wired USB. *(Needs community testing on console)*. |
+| **Microsoft Xbox 360** | Wired USB Cable (`045e:028e`) | 🟡 **Experimental (Spec-Implemented)** | XInput wired report parser implemented. |
+| **Sony DualShock 4** | Physical Micro-USB Cable | 🟡 **Experimental (Spec-Implemented)** | 64-byte USB HID parser implemented. *(Direct BT in v1.1.0)*. |
+| **Sony DualShock 3 (PS3)** | Physical Mini-USB Cable | 🟡 **Experimental (Spec-Implemented)** | USB magic wake packet (`0x03f4`) implemented. *(No Bluetooth)*. |
+| **Nintendo Switch Pro** | Physical USB-C Cable | 🟡 **Experimental (Spec-Implemented)** | 3-step USB activation handshake implemented. *(Direct BT in v1.1.0)*. |
+| **8BitDo Wireless USB Adapter (v1 / v2)** | USB 2.4G Dongle | 🟡 **Experimental (Spec-Implemented)** | Bridges wireless controllers into USB HID/XInput. |
+| **Generic PC USB Gamepads** | Standard USB Cable (HID / XInput) | 🟡 **Experimental (Spec-Implemented)** | Standard 10-byte HID normalization. |
+
+---
+
+### 🔍 Transparent Clarifications: Microsoft Xbox Controllers
+To avoid any confusion or unmet expectations, please note the exact state of Xbox hardware support:
+1. **Direct Bluetooth Pairing:** **NOT supported in v1.0.4.** Xbox One / Series X\|S controllers communicate via Bluetooth Low Energy (BLE) requiring SMP AES-128 cryptographic pairing over the console's internal radio. This stack is actively being finalized for **v1.1.0**.
+2. **Official "Xbox Wireless Adapter for Windows" (Microsoft Dongle):** **NOT supported.** The official Microsoft PC dongle uses a proprietary Wi-Fi Direct / GIP protocol that is not recognized by the FreeBSD/ProsperoOS USB driver.
+3. **How to use Xbox Controllers Today in v1.0.4:**
+   - **Option A (Wired):** Connect via a **data-capable** USB-C (Series X\|S) or Micro-USB (Xbox One) cable directly to any PS5 USB port. *(Ensure your cable has data lines; charge-only cables will not transmit inputs).*
+   - **Option B (Wireless via Third-Party USB Adapter):** Pair your Xbox controller to an **8BitDo Wireless USB Adapter 2** plugged into the PS5. The 8BitDo adapter bridges the wireless signal into standard USB inputs.
+
+---
+
+### ⚠️ What to Expect & What NOT to Expect in v1.0.4
+
+- ❌ **No Direct Console Bluetooth Yet:** You cannot currently put a controller into Bluetooth sync mode and connect directly to the PS5 without a USB cable or USB adapter. (Coming in v1.1.0).
+- ❌ **No Gyroscope / Motion Controls:** IMU sensors (accelerometer/gyro) report neutral values. Games strictly requiring motion controls must use the official DualSense on Player 1.
+- ❌ **No DualSense Adaptive Triggers / Haptics:** Non-DualSense controllers do not have Sony's proprietary force-feedback trigger motors. Standard rumble is handled natively where supported.
+- ❌ **No Multi-touch Touchpad Surface:** The touchpad is mapped as a single digital click (used by games to open maps or menus).
+- ℹ️ **Player 1 vs Virtual Slots:** OmniPad emulates **Players 2, 3, and 4** (3 virtual DualSense slots). The primary console user (Player 1) uses the official physical DualSense.
+
+*For full technical details and VID:PID tables, see [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md).*
 
 ---
 
@@ -130,7 +171,7 @@ http://<PS5_IP>:8095/
 ```
 
 - 🎮 **Slot Status:** Real-time visibility of all 4 player slots (connected gamepads and connection types).
-- 🔋 **Battery Monitoring:** Live battery percentage and charging indicator.
+- ⚡ **Power Telemetry:** Live power status (`⚡ USB Cable / 5V` for wired controllers and dongles).
 - 🔘 **Simulate PS Button:** Remotely trigger the PS button to change accounts or open the system menu.
 - 🔄 **Disconnect Slot:** Free any individual slot instantly without unplugging hardware.
 
