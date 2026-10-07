@@ -1,10 +1,10 @@
 {
   "name": "PDP Faceoff USB",
   "filename": "PDP-Faceoff-USB.elf",
-  "url": "https://github.com/arwebSE/ps5-pdp-pad/releases/download/v0.2.0-pdp-preview/PDP-Faceoff-USB.elf",
+  "url": "https://github.com/arwebSE/ps5-pdp-pad/releases/download/v0.3.0-pdp-preview/PDP-Faceoff-USB.elf",
   "source": "https://github.com/arwebSE/ps5-pdp-pad",
-  "description": "USB controller payload for PDP Faceoff Deluxe+ (0e6f:0184). Menu tested on PS5 12.60.",
-  "version": "0.2.0-preview",
+  "description": "PDP Faceoff USB controller + LAN dashboard (8096). Separate console profile required. Experimental; live tested on PS5 12.60.",
+  "version": "0.3.0-preview",
   "category": "Controller",
   "install_source": "web_upload",
   "source_name": "ps5-pdp-pad"

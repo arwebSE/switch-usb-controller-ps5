@@ -31,6 +31,7 @@ extern int32_t sceUserServiceGetLoginUserIdList(int32_t list[4]);
 extern int32_t sceUserServiceGetUserStatus(int32_t user_id, int32_t *status);
 extern int32_t scePadInit(void);
 extern int32_t scePadGetHandle(int32_t user_id, int32_t port_type, int32_t index);
+extern int32_t scePadReadState(int32_t handle, PadData *data);
 extern int32_t scePadSetProcessPrivilege(int32_t privilege);
 extern int32_t scePadVirtualDeviceAddDevice(void *param, int32_t deviceType);
 extern int32_t scePadVirtualDeviceInsertData(int32_t handle, const void *data);
@@ -59,6 +60,7 @@ typedef struct {
     pad_state_t     pad_state;      /* Latch state for continuous 250Hz injection */
     int             consecutive_insert_errors;
     int             ps_pending_on_ready;
+    long            ps_until;
 } internal_slot_t;
 
 static internal_slot_t g_slots[MAX_SLOTS];
@@ -68,6 +70,8 @@ static mbus_disconnect_fn g_disconnect = NULL;
 static mbus_unbind_fn g_unbind = NULL;
 static int g_ready = 0;
 static int32_t g_active_user = -1;
+static int32_t g_protected_user;
+static int32_t g_pdp_user;
 
 /* Log reader state */
 static int g_pending = -1;
@@ -126,6 +130,7 @@ static void purge_all_virtual_pads(void)
 }
 #endif
 
+#ifndef PDP_ONLY
 static void vpad_recycle_slot_locked(int slot)
 {
     if (slot < 0 || slot >= MAX_SLOTS) return;
@@ -165,6 +170,7 @@ static void vpad_recycle_slot_locked(int slot)
     log_line("vpad: slot %d recycled (old h=%d dev=0x%llx uid=0x%08x) -> QUEUED for re-registration",
              slot + 1, old_h, (unsigned long long)old_dev, (unsigned)old_uid);
 }
+#endif
 
 static int is_user_logged_in(int32_t uid)
 {
@@ -191,6 +197,13 @@ static int is_user_logged_in(int32_t uid)
 static int32_t get_user_id_for_slot(int slot)
 {
 #ifdef __PROSPERO__
+#ifdef PDP_ONLY
+    if (g_pdp_user > 0) {
+        if (g_pdp_user == g_protected_user || !is_user_logged_in(g_pdp_user) ||
+            vpad_native_controller_connected(g_pdp_user) == 1) return -1;
+        return g_pdp_user;
+    }
+#endif
     int32_t fg_user = -1;
     sceUserServiceGetForegroundUser(&fg_user);
 
@@ -203,9 +216,26 @@ static int32_t get_user_id_for_slot(int slot)
     /* Check if the foreground user already has an active physical DualSense */
     int native_pad_on_fg = 0;
     if (fg_user > 0 && is_user_logged_in(fg_user)) {
+#ifdef PDP_ONLY
+        native_pad_on_fg = fg_user == g_protected_user || vpad_native_controller_connected(fg_user) == 1;
+#else
         int h_native = scePadGetHandle(fg_user, 0, 0);
         if (h_native > 0) native_pad_on_fg = 1;
+#endif
     }
+
+#ifdef PDP_ONLY
+    /* Do not replace the native controller's profile assignment. A cached
+     * handle alone is not proof that a native controller is connected. */
+    if (native_pad_on_fg) {
+        for (int i = 0; i < 4; i++) {
+            if (list[i] > 0 && list[i] != fg_user && list[i] != g_protected_user && is_user_logged_in(list[i]) &&
+                vpad_native_controller_connected(list[i]) != 1) return list[i];
+        }
+        log_line("PDP: native controller occupies foreground profile; no free signed-in profile");
+        return -1;
+    }
+#endif
 
     /* Slot 0:
      * If a native controller is already active on the foreground user,
@@ -354,17 +384,22 @@ static uint64_t parse_device_id_from_klog(const char *line)
     if (st) {
         st += 7;
         while (*st == ' ' || *st == ':' || *st == '=') st++;
-        if (strncmp(st, "22", 2) != 0 && strncmp(st, "0x16", 4) != 0) {
+        char *subtype_end;
+        unsigned long subtype = strtoul(st, &subtype_end, 0);
+        if (subtype_end == st || subtype != 22 || isalnum((unsigned char)*subtype_end)) {
             return 0;
         }
     }
+#ifdef PDP_ONLY
+    else return 0; /* Never identify an untyped native device as ours. */
+#endif
 
     const char *p = find_word(line, "DeviceId");
     if (!p) p = find_word(line, "deviceId");
     if (!p) p = find_word(line, "dev_id");
     if (!p) return 0;
 
-    p += (p[0] == 'd' && p[1] == 'e' && p[2] == 'v') ? 6 : 8;
+    p += !strncmp(p, "dev_id", 6) ? 6 : 8;
     while (*p == ' ' || *p == ':' || *p == '=' ) p++;
     return hex_to_u64(p);
 }
@@ -402,9 +437,34 @@ static void poll_kernel_log(void)
     }
 }
 
+static int32_t read_user_config(const char *path)
+{
+    FILE *file = fopen(path, "r");
+    if (!file) return 0;
+    char value[32] = {0};
+    int have_value = fgets(value, sizeof(value), file) != NULL;
+    fclose(file);
+    char *end;
+    errno = 0;
+    unsigned long user = strtoul(value, &end, 16);
+    while (*end && isspace((unsigned char)*end)) end++;
+    if (!have_value || errno || end == value || *end || !user || user > 0x7fffffffUL) return -1;
+    return (int32_t)user;
+}
+
 int vpad_init(void)
 {
     if (g_ready) return 1;
+
+#ifdef PDP_ONLY
+    g_protected_user = read_user_config("/data/pdp-pad/native-user");
+    g_pdp_user = read_user_config("/data/pdp-pad/pdp-user");
+    if (g_protected_user < 0 || g_pdp_user < 0 || (g_pdp_user > 0 && g_pdp_user == g_protected_user)) {
+        log_line("PDP: invalid/conflicting profile configuration; refusing to initialize");
+        return 0;
+    }
+    log_line("PDP: protected native user 0x%08x; preferred PDP user 0x%08x", (unsigned)g_protected_user, (unsigned)g_pdp_user);
+#endif
 
     if (!elevate_privileges()) {
         log_line("vpad: failed to elevate privileges");
@@ -426,12 +486,19 @@ int vpad_init(void)
     }
 
     if (!g_bind) {
+#ifdef PDP_ONLY
+        log_line("vpad: local MBus unavailable; refusing virtual pad creation");
+        restore_privileges();
+        return 0;
+#else
         log_line("vpad: local libSceMbus unavailable, SceShellCore remote injection will be used");
+#endif
     }
 
     int r = scePadInit();
     if (r != 0) {
         log_line("vpad: scePadInit returned 0x%08x", (unsigned)r);
+        restore_privileges();
         return 0;
     }
 
@@ -522,6 +589,12 @@ static void start_identification(int slot)
         g_line_len = 0;
     } else {
         log_line("vpad: slot %d warning: klog unavailable, proceeding directly", slot);
+#ifdef PDP_ONLY
+        /* No AddDevice means no unidentified orphan and no native-handle
+         * fallback when ownership cannot be established. */
+        g_slots[slot].status = VP_FAILED;
+        return;
+#endif
     }
 
     g_matches = 0;
@@ -610,6 +683,14 @@ static void finish_identification(long now)
         return;
     }
     s->user_id = get_user_id_for_slot(slot);
+    if (s->user_id <= 0) {
+        /* Keep only our uniquely identified device unbound. The native
+         * profile picker can sign in the separate PDP user; never bind
+         * to the protected DualSense user just to get input working. */
+        s->status = VP_READY;
+        log_line("PDP: virtual pad waiting unbound; press Home and choose the separate controller profile");
+        return;
+    }
     int32_t bind_result = -1;
     if (s->user_id > 0 && g_bind) bind_result = g_bind(s->device_id, s->user_id);
     log_line("vpad: PDP bind device 0x%llx to user 0x%08x -> 0x%08x",
@@ -742,6 +823,24 @@ void vpad_poll(long now)
     }
 #endif
 
+#ifdef PDP_ONLY
+    static long last_binding_check;
+    if (now - last_binding_check > 500) {
+        last_binding_check = now;
+        pthread_mutex_lock(&g_vpad_mutex);
+        internal_slot_t *s = &g_slots[0];
+        if (s->status == VP_READY && s->user_id <= 0 && s->device_id && g_bind) {
+            int32_t target = get_user_id_for_slot(0);
+            if (target > 0) {
+                int32_t result = g_bind(s->device_id, target);
+                if (result == 0) s->user_id = target;
+                else s->status = VP_FAILED;
+                log_line("PDP: delayed profile bind user 0x%08x -> 0x%08x", (unsigned)target, (unsigned)result);
+            }
+        }
+        pthread_mutex_unlock(&g_vpad_mutex);
+    }
+#endif
 
     /* Continuous 250Hz injection of the last known state for all READY pads */
     for (int i = 0; i < MAX_SLOTS; i++) {
@@ -773,14 +872,20 @@ void vpad_poll(long now)
             pad_time = (uint64_t)now * 1000ULL;
 #endif
             pad_data_from_state(&d, &g_slots[i].pad_state, pad_time);
+            if (now < g_slots[i].ps_until) d.buttons |= PAD_BTN_PS;
 
             int32_t handle = g_slots[i].handle;
+#if !defined(PDP_ONLY) || !defined(__PROSPERO__)
             int32_t alt_handle = g_slots[i].alt_handle;
+#endif
             g_slots[i].packets_injected++;
+#ifndef PDP_ONLY
             pthread_mutex_unlock(&g_vpad_mutex);
+#endif
 
 #ifdef __PROSPERO__
             int r = scePadVirtualDeviceInsertData(handle, &d);
+#ifndef PDP_ONLY
             if (r != 0 && alt_handle > 0) {
                 int r2 = scePadVirtualDeviceInsertData(alt_handle, &d);
                 if (r2 == 0) {
@@ -795,8 +900,11 @@ void vpad_poll(long now)
                     r = 0;
                 }
             }
+#endif
 
+#ifndef PDP_ONLY
             pthread_mutex_lock(&g_vpad_mutex);
+#endif
             if (r == 0) {
                 g_slots[i].consecutive_insert_errors = 0;
             } else {
@@ -822,6 +930,9 @@ void vpad_poll(long now)
             pthread_mutex_unlock(&g_vpad_mutex);
 #else
             (void)handle; (void)alt_handle;
+#ifdef PDP_ONLY
+            pthread_mutex_unlock(&g_vpad_mutex);
+#endif
 #endif
         } else {
             pthread_mutex_unlock(&g_vpad_mutex);
@@ -847,7 +958,9 @@ void vpad_remove(int slot)
     int32_t uid = s->user_id;
     int had_device = (s->status != VP_FREE);
     memset(s, 0, sizeof(*s));
+#ifndef PDP_ONLY
     pthread_mutex_unlock(&g_vpad_mutex);
+#endif
 
 #ifdef __PROSPERO__
     if (had_device) {
@@ -867,18 +980,27 @@ void vpad_remove(int slot)
         notify_ps5("OmniPad: Controller disconnected (Slot %d)", slot + 1);
     }
 #endif
+#ifdef PDP_ONLY
+    pthread_mutex_unlock(&g_vpad_mutex);
+#endif
 }
 
 int vpad_is_live(int slot)
 {
     if (slot < 0 || slot >= MAX_SLOTS) return 0;
-    return g_slots[slot].status == VP_READY;
+    pthread_mutex_lock(&g_vpad_mutex);
+    int live = g_slots[slot].status == VP_READY;
+    pthread_mutex_unlock(&g_vpad_mutex);
+    return live;
 }
 
 int vpad_slot_is_free(int slot)
 {
     if (slot < 0 || slot >= MAX_SLOTS) return 0;
-    return g_slots[slot].status == VP_FREE;
+    pthread_mutex_lock(&g_vpad_mutex);
+    int free_slot = g_slots[slot].status == VP_FREE;
+    pthread_mutex_unlock(&g_vpad_mutex);
+    return free_slot;
 }
 
 void vpad_update(int slot, const pad_state_t *st)
@@ -925,6 +1047,12 @@ void vpad_update(int slot, const pad_state_t *st)
 void vpad_press_ps_button(int slot)
 {
     if (slot < 0 || slot >= MAX_SLOTS) return;
+#ifdef PDP_ONLY
+    pthread_mutex_lock(&g_vpad_mutex);
+    if (g_slots[slot].status == VP_READY) g_slots[slot].ps_until = now_ms() + 150;
+    pthread_mutex_unlock(&g_vpad_mutex);
+    return;
+#endif
     pthread_mutex_lock(&g_vpad_mutex);
     int32_t handle = g_slots[slot].handle;
     pthread_mutex_unlock(&g_vpad_mutex);
@@ -959,6 +1087,11 @@ void vpad_get_slot_info(int slot, vpad_slot_info_t *out)
     out->packets_injected = g_slots[slot].packets_injected;
     out->connected_time = g_slots[slot].connected_time;
     out->last_update_time = g_slots[slot].last_update_time;
+    out->buttons = g_slots[slot].pad_state.buttons;
+    out->lx = g_slots[slot].pad_state.lx;
+    out->ly = g_slots[slot].pad_state.ly;
+    out->rx = g_slots[slot].pad_state.rx;
+    out->ry = g_slots[slot].pad_state.ry;
     pthread_mutex_unlock(&g_vpad_mutex);
 }
 
@@ -973,6 +1106,22 @@ int vpad_rebind_user(int slot, int32_t user_id)
     }
 
     int32_t target_user = user_id;
+#ifdef PDP_ONLY
+    if (!is_user_logged_in(target_user) || !g_bind || !s->device_id) {
+        pthread_mutex_unlock(&g_vpad_mutex);
+        return 0;
+    }
+    if (target_user == g_protected_user || vpad_native_controller_connected(target_user) == 1) {
+        pthread_mutex_unlock(&g_vpad_mutex);
+        log_line("PDP: refusing to bind over a connected native controller");
+        return 0;
+    }
+    int32_t result = g_bind(s->device_id, target_user);
+    if (result == 0) s->user_id = target_user;
+    pthread_mutex_unlock(&g_vpad_mutex);
+    log_line("PDP dashboard: bind to user 0x%08x -> 0x%08x", (unsigned)target_user, (unsigned)result);
+    return result == 0;
+#endif
 #ifdef __PROSPERO__
     if (target_user <= 0) {
         /* Cycle to next logged in user */
@@ -1022,7 +1171,39 @@ void vpad_cleanup_all(void)
     for (int i = 0; i < MAX_SLOTS; i++) {
         vpad_remove(i);
     }
+#ifdef PDP_ONLY
+    /* A stop/release during AddDevice must still finish ownership discovery
+     * and honor remove_when_found, rather than abandon a pending pad. */
+    long deadline = now_ms() + T_IDENTIFY + T_AMBIGUITY;
+    for (;;) {
+        pthread_mutex_lock(&g_vpad_mutex);
+        int pending = g_pending;
+        pthread_mutex_unlock(&g_vpad_mutex);
+        if (pending < 0 || now_ms() >= deadline) break;
+        vpad_poll(now_ms());
+        usleep(4000);
+    }
+    close_kernel_log();
+#endif
     restore_privileges();
     g_ready = 0;
+}
+
+int vpad_native_controller_connected(int32_t user)
+{
+#ifdef __PROSPERO__
+    int32_t handle = scePadGetHandle(user, 0, 0);
+    PadData data = {0};
+    if (handle <= 0 || scePadReadState(handle, &data) != 0) return -1;
+    return data.connected != 0;
+#else
+    (void)user;
+    return -1;
+#endif
+}
+
+int32_t vpad_get_protected_user(void)
+{
+    return g_protected_user;
 }
 

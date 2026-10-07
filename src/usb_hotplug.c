@@ -669,7 +669,10 @@ static void probe_usb_devices(void)
                                            strstr(ctrl_name, "Receiver") != NULL));
             sdev->conn_type = is_dongle ? CONN_USB_DONGLE_24G : CONN_USB_WIRED;
 
-            vpad_add(slot, sdev->conn_type, ctrl_name);
+#ifdef PDP_ONLY
+            if (access("/data/pdp-pad/pause", F_OK) != 0)
+#endif
+                vpad_add(slot, sdev->conn_type, ctrl_name);
             pthread_create(&sdev->thread, NULL, usb_reader_worker, sdev);
         }
     }
@@ -681,6 +684,19 @@ int usb_hotplug_init(void)
     pthread_mutex_init(&g_usb_hotplug.lock, NULL);
     log_line("usb_hotplug: Initialized USB hotplug manager");
     return 1;
+}
+
+int usb_hotplug_pdp_connected(void)
+{
+    int connected = 0;
+    pthread_mutex_lock(&g_usb_hotplug.lock);
+    for (int i = 0; i < MAX_SLOTS; i++) {
+        if (g_usb_hotplug.devices[i].active && !g_usb_hotplug.devices[i].stop_thread &&
+            g_usb_hotplug.devices[i].vid == 0x0e6f && g_usb_hotplug.devices[i].pid == 0x0184)
+            connected = 1;
+    }
+    pthread_mutex_unlock(&g_usb_hotplug.lock);
+    return connected;
 }
 
 void usb_hotplug_poll(long now)

@@ -1,10 +1,10 @@
 # PDP Faceoff USB-only PS5 payload
 
-This branch is a narrowly scoped derivative of [OmniPad PS5](https://github.com/diegobarbosaa/OmniPad-PS5), licensed under GPL-3.0. It supports only the PDP Faceoff Deluxe+ Audio Wired Controller for Nintendo Switch (`0e6f:0184`). Bluetooth, web UI, TCP streaming, and autoload are not included in the dedicated ELF.
+This branch is a narrowly scoped derivative of [OmniPad PS5](https://github.com/diegobarbosaa/OmniPad-PS5), licensed under GPL-3.0. It supports only the PDP Faceoff Deluxe+ Audio Wired Controller for Nintendo Switch (`0e6f:0184`). The dedicated ELF includes a small LAN dashboard. Bluetooth pairing/scanning, TCP input streaming, and autoload are not included.
 
 Build with `make -f pdp.mk` in the included PS5 SDK Docker image. The output is `dist/PDP-Faceoff-USB.elf`. This payload is intended for manual loading. It uses local virtual-pad and MBus APIs with elevated process credentials; shell-process injection is disabled in this build. To stop it, create `/data/pdp-pad/stop` or terminate its process. Logs go to `/data/pdp-pad/pdp-pad.log`.
 
-Live testing on firmware 12.60 confirmed USB discovery, button reports, successful MBus binding to the signed-in foreground user, accepted virtual-pad input, and working PS5 menu navigation. Games and other firmware versions have not been tested. The startup path does not sweep other virtual pads. Device creation uses flag `1`; account binding is handled separately through MBus. Input timestamps use the system monotonic clock, and held controls remain latched until a new USB report or disconnect.
+Live testing on firmware 12.60 confirmed USB discovery, button reports, successful MBus binding to a separate signed-in controller profile, accepted virtual-pad input, and working PS5 menu navigation. The user confirmed successful live use of the dashboard build. Games and other firmware versions have not been explicitly verified. The startup path does not sweep other virtual pads. Device creation uses flag `1`; account binding is handled separately through MBus. Input timestamps use the system monotonic clock, and held controls remain latched until a new USB report or disconnect.
 
 Face buttons use their physical PlayStation positions: Switch B = Cross/confirm, A = Circle/back, Y = Square, X = Triangle. Home = PS; Capture = touchpad click. ZL and ZR are digital triggers. Motion, rumble, adaptive triggers, and controller audio are not implemented.
 
@@ -17,7 +17,35 @@ docker build -t ps5-pdp-pad-builder .
 docker run --rm -v "$PWD:/work" -w /work ps5-pdp-pad-builder
 ```
 
-Load the resulting ELF manually through an ELF loader or Payload Manager. Start games from the profile that the controller is bound to. Stop the previous instance before loading another copy.
+Load the resulting ELF manually through an ELF loader or Payload Manager. Assign the PDP to its separate console profile; Home/PS can request controller focus. This project's game-focus behavior has not been explicitly verified. Stop the previous instance before loading another copy.
+
+### Lightweight dashboard (experimental)
+
+Open `http://<PS5_IP>:8096/` while the payload is running. The dashboard shows USB/virtual-pad state, input, signed-in profiles, native controller connection state reported by libScePad, and the last 12 KB of logs. It can send Home/PS, assign our virtual pad to a signed-in profile, release it, reconnect it, or stop the payload. It cannot repair Bluetooth pairing or restart the console's Bluetooth services.
+
+Release persists `/data/pdp-pad/pause`: unplugging/replugging the PDP or reloading this build will not create a virtual pad until Reconnect is pressed. For a paused initial test, create that marker before loading. Stop exits the process and removes its known virtual pad; the dashboard goes offline. The build also holds a process-lifetime file lock to prevent duplicate instances of this version. Older versions do not participate in the lock and must be stopped first.
+
+This dashboard has **no authentication**. Keep port 8096 on a trusted LAN and do not port-forward or expose it through a public proxy. Mutations require a custom header and no cross-origin access is enabled; this is not a substitute for authentication.
+
+Use a separate console profile for the PDP, not the one assigned to the DualSense. Optional `/data/pdp-pad/native-user` contains the native profile's eight-digit hexadecimal user ID; this build will never programmatically bind its virtual pad to that profile. Optional `/data/pdp-pad/pdp-user` contains the intended PDP profile ID and prevents automatic binding to any other profile. IDs are console-specific; do not copy another console's values. When the PDP profile is not signed in, the pad remains unbound: press Home and select the separate profile, after which the payload binds its own identified device to it.
+
+Native connection telemetry may be unavailable from the payload process. The dashboard reports `null`/unavailable, not disconnected, in that case. It does not open native controllers or inject code into other processes to obtain their handles. A reported connected native controller also blocks programmatic rebinding to its profile, but unavailable telemetry cannot prove that no native controller is present. Explicit profile protection and human verification remain necessary. Do not select the DualSense profile in the console's own profile picker; that is outside the payload's binding controls.
+
+**Compatibility investigation:** native DualSense controllers stopped connecting during a session after AnyPad and PDP builds had been used. Stopping our payload and deleting its known virtual pad did not recover them; a full console reboot did. Native controllers worked after the jailbreak was reactivated and while the dashboard/USB reader ran paused. After enabling the virtual pad with separate/protected profiles, the user confirmed successful live use. The original failure's cause and longer-term native/virtual coexistence remain unverified. Do not treat this as a stable release or load it automatically. Preserve a working native controller baseline before further tests.
+
+Host tests, run in a disposable Linux container (dashboard mocks create `/data/pdp-pad`):
+
+```sh
+clang -std=c11 -Wall -Wextra -Werror -pthread -fsanitize=address,undefined \
+  -g -Isrc tests/test_pdp_dashboard.c -o /tmp/pdp-dashboard-test
+/tmp/pdp-dashboard-test
+clang -std=c11 -Wall -Wextra -Isrc tests/test_pdp.c src/usb_controllers.c \
+  -o /tmp/pdp-parser-test
+/tmp/pdp-parser-test
+clang -std=c11 -Wall -Wextra -Werror -pthread -fsanitize=address,undefined \
+  -g -Isrc tests/test_pdp_lifecycle.c src/util.c -ldl -o /tmp/pdp-lifecycle-test
+/tmp/pdp-lifecycle-test
+```
 
 The source below is the upstream OmniPad documentation, retained for attribution and context.
 
