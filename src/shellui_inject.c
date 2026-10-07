@@ -239,6 +239,10 @@ static int64_t pt_call_remote(pid_t pid, intptr_t fn, intptr_t trap_rip,
 
 int shellui_press_ps_button(int32_t handle)
 {
+#ifdef PDP_ONLY
+    /* USB-only build submits Home through its own virtual pad. */
+    return handle;
+#endif
 #ifdef __PROSPERO__
     pid_t pid = find_process_by_name("SceShellUI");
     if (pid <= 0) pid = find_process_by_name("SceShellCore");
@@ -379,6 +383,10 @@ int shellui_press_ps_button(int32_t handle)
 
 int shellcore_vda(int *code)
 {
+#ifdef PDP_ONLY
+    *code = -1;
+    return -1;
+#endif
 #ifdef __PROSPERO__
     pid_t pid = find_process_by_name("SceShellCore");
     if (pid <= 0) pid = find_process_by_name("SceShellUI");
@@ -477,6 +485,11 @@ static int call_remote_mbus(const char *proc_name, const char *sym, uint64_t a1,
 
 int shellui_remote_bind_device(uint64_t device_id, int32_t user_id)
 {
+#ifdef PDP_ONLY
+    (void)device_id;
+    (void)user_id;
+    return -1;
+#endif
 #ifdef __PROSPERO__
     int64_t res = -1;
     /* Try SceShellUI first, fallback to SceShellCore */
@@ -495,6 +508,11 @@ int shellui_remote_bind_device(uint64_t device_id, int32_t user_id)
 
 int shellui_remote_unbind_device(uint64_t device_id, int32_t user_id)
 {
+#ifdef PDP_ONLY
+    (void)device_id;
+    (void)user_id;
+    return -1;
+#endif
 #ifdef __PROSPERO__
     int64_t res = -1;
     if (call_remote_mbus("SceShellUI", "sceMbusUnbindDeviceWithUserId", device_id, (uint64_t)(uint32_t)user_id, &res) != 0 || res != 0) {
@@ -516,6 +534,10 @@ int shellui_remote_unbind_device(uint64_t device_id, int32_t user_id)
 
 int shellui_remote_disconnect_device(uint64_t device_id)
 {
+#ifdef PDP_ONLY
+    (void)device_id;
+    return -1;
+#endif
 #ifdef __PROSPERO__
     int64_t res = -1;
     /* Try SceShellUI first, fallback to SceShellCore */

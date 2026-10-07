@@ -2,7 +2,11 @@
 
 This branch is a narrowly scoped derivative of [OmniPad PS5](https://github.com/diegobarbosaa/OmniPad-PS5), licensed under GPL-3.0. It supports only the PDP Faceoff Deluxe+ Audio Wired Controller for Nintendo Switch (`0e6f:0184`). Bluetooth, web UI, TCP streaming, and autoload are not included in the dedicated ELF.
 
-Build with `make -f pdp.mk` in the included PS5 SDK Docker image. The output is `dist/PDP-Faceoff-USB.elf`. This payload is intended for manual loading only; it has **not yet been validated on a PS5**, and the inherited virtual-pad/ShellUI code has elevated privileges. Do not add it to autoload. To stop it, create `/data/pdp-pad/stop` or terminate its process. Logs go to `/data/pdp-pad/pdp-pad.log`.
+Build with `make -f pdp.mk` in the included PS5 SDK Docker image. The output is `dist/PDP-Faceoff-USB.elf`. This payload is intended for manual loading. It uses local virtual-pad and MBus APIs with elevated process credentials; shell-process injection is disabled in this build. To stop it, create `/data/pdp-pad/stop` or terminate its process. Logs go to `/data/pdp-pad/pdp-pad.log`.
+
+Live testing on firmware 12.60 confirmed USB discovery, button reports, successful MBus binding to the signed-in foreground user, accepted virtual-pad input, and working PS5 menu navigation. Games and other firmware versions have not been tested. The startup path does not sweep other virtual pads. Device creation uses flag `1`; account binding is handled separately through MBus. Input timestamps use the system monotonic clock, and held controls remain latched until a new USB report or disconnect.
+
+Face buttons use their physical PlayStation positions: Switch B = Cross/confirm, A = Circle/back, Y = Square, X = Triangle. Home = PS; Capture = touchpad click. ZL and ZR are digital triggers. Motion, rumble, adaptive triggers, and controller audio are not implemented.
 
 The source below is the upstream OmniPad documentation, retained for attribution and context.
 

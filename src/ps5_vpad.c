@@ -16,6 +16,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <pthread.h>
+#include <time.h>
 
 #define VIRTUAL_DEVICE_DUALSENSE 3
 #define T_IDENTIFY               3000   /* ms to wait for DEVICE_ADDED */
@@ -169,10 +170,20 @@ static int is_user_logged_in(int32_t uid)
 {
     if (uid <= 0) return 0;
 #ifdef __PROSPERO__
+#ifdef PDP_ONLY
+    /* Use the login list rather than assuming a firmware-specific status enum. */
+    int32_t users[4] = {-1, -1, -1, -1};
+    if (sceUserServiceGetLoginUserIdList(users) != 0) return 0;
+    for (int i = 0; i < 4; i++) {
+        if (users[i] == uid) return 1;
+    }
+    return 0;
+#else
     int32_t status = 0;
     if (sceUserServiceGetUserStatus(uid, &status) == 0) {
         return status == 1; /* SCE_USER_SERVICE_USER_STATUS_LOGGED_IN */
     }
+#endif
 #endif
     return 0;
 }
@@ -488,6 +499,11 @@ static void start_identification(int slot)
     param.size = (int32_t)sizeof(param);
     g_slots[slot].user_id = get_user_id_for_slot(slot);
     param.user_id = (g_slots[slot].user_id > 0) ? g_slots[slot].user_id : 1;
+#ifdef PDP_ONLY
+    /* This field is a device creation flag, not the user's account ID.
+     * Bind the identified device to the account through MBus afterwards. */
+    param.user_id = 1;
+#endif
     for (int i = 0; i < 6; i++) param.pad[i] = sentinel;
     elevate_privileges();
 
@@ -578,6 +594,38 @@ static void finish_identification(long now)
     g_pending = -1;
     close_kernel_log();
 
+#ifdef PDP_ONLY
+    /* Only submit data to a device uniquely observed during our AddDevice. */
+    if (g_matches != 1) {
+        log_line("vpad: PDP device identification failed (%d matches)", g_matches);
+        s->status = VP_FAILED;
+        return;
+    }
+    s->device_id = g_match_dev;
+    s->handle = (int32_t)(g_match_dev & 0xffffffffu);
+    s->alt_handle = -1;
+    if (s->remove_when_found) {
+        scePadVirtualDeviceDeleteDevice(s->handle);
+        memset(s, 0, sizeof(*s));
+        return;
+    }
+    s->user_id = get_user_id_for_slot(slot);
+    int32_t bind_result = -1;
+    if (s->user_id > 0 && g_bind) bind_result = g_bind(s->device_id, s->user_id);
+    log_line("vpad: PDP bind device 0x%llx to user 0x%08x -> 0x%08x",
+             (unsigned long long)s->device_id, (unsigned)s->user_id, (unsigned)bind_result);
+    if (bind_result != 0) {
+        scePadVirtualDeviceDeleteDevice(s->handle);
+        s->handle = -1;
+        s->device_id = 0;
+        s->status = VP_FAILED;
+        return;
+    }
+    s->status = VP_READY;
+    log_line("vpad: PDP ready (handle %d)", s->handle);
+    return;
+#endif
+
     if (g_matches == 1) {
         s->device_id = g_match_dev;
     } else {
@@ -665,7 +713,7 @@ void vpad_poll(long now)
         pthread_mutex_unlock(&g_vpad_mutex);
     }
 
-#ifdef __PROSPERO__
+#if defined(__PROSPERO__) && !defined(PDP_ONLY)
     /* Dynamic profile sync: detect when a user logs in and resolve active libScePad handle */
     static long s_last_user_sync = 0;
     if (now - s_last_user_sync > 500) {
@@ -700,9 +748,11 @@ void vpad_poll(long now)
         pthread_mutex_lock(&g_vpad_mutex);
         if (g_slots[i].status == VP_READY && (g_slots[i].handle > 0 || g_slots[i].alt_handle > 0)) {
             /* Reset latched state to neutral if no updates received for > 500ms (avoids stuck buttons on sleep) */
+#ifndef PDP_ONLY
             if (now - g_slots[i].last_update_time > 500) {
                 pad_state_neutral(&g_slots[i].pad_state);
             }
+#endif
 
             if (g_slots[i].handle <= 0 && g_slots[i].alt_handle > 0) {
                 g_slots[i].handle = g_slots[i].alt_handle;
@@ -711,8 +761,14 @@ void vpad_poll(long now)
             PadData d;
             uint64_t pad_time = 0;
 #ifdef __PROSPERO__
+#ifdef PDP_ONLY
+            struct timespec ts;
+            clock_gettime(CLOCK_MONOTONIC, &ts);
+            pad_time = (uint64_t)ts.tv_sec * 1000000u + (uint64_t)ts.tv_nsec / 1000u;
+#else
             pad_time = sceKernelGetProcessTime();
             if (pad_time > 1000) pad_time -= 1000;
+#endif
 #else
             pad_time = (uint64_t)now * 1000ULL;
 #endif
@@ -753,9 +809,14 @@ void vpad_poll(long now)
                 }
                 /* If handle fails repeatedly for > 250 consecutive ticks (~1000ms), handle is dead */
                 if (g_slots[i].consecutive_insert_errors >= 250) {
+#ifdef PDP_ONLY
+                    log_line("vpad: PDP input rejected; stopping this virtual pad");
+                    g_slots[i].status = VP_FAILED;
+#else
                     log_line("vpad: slot %d persistent InsertData error (0x%08x) — recycling virtual device",
                              i + 1, (unsigned)r);
                     vpad_recycle_slot_locked(i);
+#endif
                 }
             }
             pthread_mutex_unlock(&g_vpad_mutex);

@@ -59,6 +59,7 @@ int main(void)
     }
     usb_hotplug_cleanup();
     vpad_cleanup_all();
+    log_line("PDP payload stopped cleanly");
     log_close();
     return 0;
 }
