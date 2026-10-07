@@ -16,6 +16,10 @@
 
 usb_controller_type_t usb_identify_controller(uint16_t vid, uint16_t pid, const char **name_out)
 {
+    if (vid == 0x0e6f && pid == 0x0184) {
+        if (name_out) *name_out = "PDP Faceoff Deluxe+ Wired";
+        return CTRL_PDP_FACEOFF;
+    }
     /* Nintendo Switch controllers */
     if (vid == 0x057e) {
         if (pid == 0x2009) {
@@ -186,6 +190,44 @@ int usb_parse_input_report(usb_controller_type_t type, const uint8_t *data, size
     pad_state_neutral(st);
 
     switch (type) {
+    case CTRL_PDP_FACEOFF: {
+        /* HID descriptor: 14 buttons, two padding bits, 4-bit hat, four
+         * unsigned 8-bit axes, then one padding byte. No report ID.
+         * Some host HID APIs prepend a zero report ID; USB_FS does not. */
+        size_t off = (len == 9 && data[0] == 0) ? 1 : 0;
+        if (len < off + 7) return 0;
+        uint16_t b = (uint16_t)data[off] | ((uint16_t)data[off + 1] << 8);
+        if (b & (1u << 0)) st->buttons |= PAD_BTN_TRIANGLE; /* X */
+        if (b & (1u << 1)) st->buttons |= PAD_BTN_CIRCLE;   /* A */
+        if (b & (1u << 2)) st->buttons |= PAD_BTN_CROSS;    /* B */
+        if (b & (1u << 3)) st->buttons |= PAD_BTN_SQUARE;   /* Y */
+        if (b & (1u << 4)) st->buttons |= PAD_BTN_L1;
+        if (b & (1u << 5)) st->buttons |= PAD_BTN_R1;
+        if (b & (1u << 6)) { st->buttons |= PAD_BTN_L2; st->l2 = 255; }
+        if (b & (1u << 7)) { st->buttons |= PAD_BTN_R2; st->r2 = 255; }
+        if (b & (1u << 8)) st->buttons |= PAD_BTN_SHARE;
+        if (b & (1u << 9)) st->buttons |= PAD_BTN_OPTIONS;
+        if (b & (1u << 10)) st->buttons |= PAD_BTN_L3;
+        if (b & (1u << 11)) st->buttons |= PAD_BTN_R3;
+        if (b & (1u << 12)) st->buttons |= PAD_BTN_PS;
+        if (b & (1u << 13)) st->buttons |= PAD_BTN_TOUCHPAD;
+        switch (data[off + 2] & 0x0f) {
+        case 0: st->buttons |= PAD_DPAD_UP; break;
+        case 1: st->buttons |= PAD_DPAD_UP | PAD_DPAD_RIGHT; break;
+        case 2: st->buttons |= PAD_DPAD_RIGHT; break;
+        case 3: st->buttons |= PAD_DPAD_DOWN | PAD_DPAD_RIGHT; break;
+        case 4: st->buttons |= PAD_DPAD_DOWN; break;
+        case 5: st->buttons |= PAD_DPAD_DOWN | PAD_DPAD_LEFT; break;
+        case 6: st->buttons |= PAD_DPAD_LEFT; break;
+        case 7: st->buttons |= PAD_DPAD_UP | PAD_DPAD_LEFT; break;
+        default: break;
+        }
+        st->lx = data[off + 3];
+        st->ly = data[off + 4];
+        st->rx = data[off + 5];
+        st->ry = data[off + 6];
+        return 1;
+    }
     case CTRL_NINTENDO_SWITCH_PRO: {
         /* 64-byte or standard Switch Pro input report */
         if (len < 12) return 0;

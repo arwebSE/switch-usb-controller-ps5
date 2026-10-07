@@ -12,7 +12,8 @@ typedef enum {
     CTRL_SONY_DS3,
     CTRL_XBOX_XINPUT,
     CTRL_8BITDO_ADAPTER,
-    CTRL_GENERIC_HID
+    CTRL_GENERIC_HID,
+    CTRL_PDP_FACEOFF
 } usb_controller_type_t;
 
 usb_controller_type_t usb_identify_controller(uint16_t vid, uint16_t pid, const char **name_out);

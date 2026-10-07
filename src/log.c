@@ -31,7 +31,6 @@ void log_init(const char *path)
 {
     pthread_mutex_lock(&g_log_mutex);
     if (g_log_file) fclose(g_log_file);
-    mkdir("/data/anypad", 0755);
     g_log_file = fopen(path, "a");
     pthread_mutex_unlock(&g_log_mutex);
 }
@@ -63,7 +62,11 @@ void log_line(const char *fmt, ...)
     pthread_mutex_unlock(&g_log_mutex);
 
 #ifdef __PROSPERO__
+#ifdef PDP_ONLY
+    klog_printf("[PDP-Pad] %s\n", buf);
+#else
     klog_printf("[OmniPad] %s\n", buf);
+#endif
 #endif
 }
 

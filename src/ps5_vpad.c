@@ -104,6 +104,7 @@ static void mbus_disconnect_device(uint64_t device_id, int32_t user_id)
 #endif
 }
 
+#ifndef PDP_ONLY
 static void purge_all_virtual_pads(void)
 {
 #ifdef __PROSPERO__
@@ -122,6 +123,7 @@ static void purge_all_virtual_pads(void)
     }
 #endif
 }
+#endif
 
 static void vpad_recycle_slot_locked(int slot)
 {
@@ -425,8 +427,10 @@ int vpad_init(void)
     /* Start with process privilege 1 to manage virtual pads */
     scePadSetProcessPrivilege(1);
 
-    /* Purge any lingering zombie virtual pads from previous crashes or unplugs */
+    /* The dedicated PDP payload must not delete pads owned by other payloads. */
+#ifndef PDP_ONLY
     purge_all_virtual_pads();
+#endif
 #endif
 
     g_active_user = get_user_id_for_slot(0);

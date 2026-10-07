@@ -1,3 +1,13 @@
+# PDP Faceoff USB-only PS5 payload
+
+This branch is a narrowly scoped derivative of [OmniPad PS5](https://github.com/diegobarbosaa/OmniPad-PS5), licensed under GPL-3.0. It supports only the PDP Faceoff Deluxe+ Audio Wired Controller for Nintendo Switch (`0e6f:0184`). Bluetooth, web UI, TCP streaming, and autoload are not included in the dedicated ELF.
+
+Build with `make -f pdp.mk` in the included PS5 SDK Docker image. The output is `dist/PDP-Faceoff-USB.elf`. This payload is intended for manual loading only; it has **not yet been validated on a PS5**, and the inherited virtual-pad/ShellUI code has elevated privileges. Do not add it to autoload. To stop it, create `/data/pdp-pad/stop` or terminate its process. Logs go to `/data/pdp-pad/pdp-pad.log`.
+
+The source below is the upstream OmniPad documentation, retained for attribution and context.
+
+---
+
 # OmniPad PS5 🎮🚀
 ### Universal Controller Engine & Web Control Center for PlayStation 5 (FW 7.00 – 13.60)
 

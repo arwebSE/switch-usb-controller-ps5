@@ -545,6 +545,14 @@ static void probe_usb_devices(void)
                 continue;
             }
 
+#ifdef PDP_ONLY
+            /* Never claim or send USB transfers to any other device. */
+            if (vid != 0x0e6f || pid != 0x0184) {
+                close(fd);
+                continue;
+            }
+#endif
+
             const char *ctrl_name = NULL;
             usb_controller_type_t ctype = usb_identify_controller(vid, pid, &ctrl_name);
 
