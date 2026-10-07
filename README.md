@@ -8,6 +8,17 @@ Live testing on firmware 12.60 confirmed USB discovery, button reports, successf
 
 Face buttons use their physical PlayStation positions: Switch B = Cross/confirm, A = Circle/back, Y = Square, X = Triangle. Home = PS; Capture = touchpad click. ZL and ZR are digital triggers. Motion, rumble, adaptive triggers, and controller audio are not implemented.
 
+The USB reader keeps a single input transfer pending until its completion is consumed, then immediately re-arms it. This preserves D-pad press and release events instead of restarting an unfinished transfer.
+
+Build on Linux with Docker:
+
+```sh
+docker build -t ps5-pdp-pad-builder .
+docker run --rm -v "$PWD:/work" -w /work ps5-pdp-pad-builder
+```
+
+Load the resulting ELF manually through an ELF loader or Payload Manager. Start games from the profile that the controller is bound to. Stop the previous instance before loading another copy.
+
 The source below is the upstream OmniPad documentation, retained for attribution and context.
 
 ---

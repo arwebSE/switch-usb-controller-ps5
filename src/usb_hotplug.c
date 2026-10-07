@@ -40,6 +40,7 @@ typedef struct {
     uint8_t               out_index;
     int                   has_out;
     int                   use_fs;
+    int                   in_pending;
     void                 *fs_frame[4];
     uint32_t              fs_len[4];
     uint8_t               rx_buf[64];
@@ -220,6 +221,37 @@ static int usb_fs_recv_packet(usb_slot_device_t *dev, uint8_t *buffer, uint32_t 
 {
     if (!dev->use_fs) return -1;
     struct usb_fs_endpoint *ep = &dev->endpoints[dev->in_index];
+#ifdef PDP_ONLY
+    (void)timeout_ms;
+    /* Do not restart a transfer before consuming its completion. The old
+     * short-timeout loop could discard press/release reports between calls. */
+    if (!dev->in_pending) {
+        dev->fs_len[dev->in_index] = 8;
+        ep->nFrames = 1;
+        ep->timeout = 1000;
+        struct usb_fs_start start = {0};
+        start.ep_index = dev->in_index;
+        if (ioctl(dev->fd, USB_FS_START, &start) != 0) return -1;
+        dev->in_pending = 1;
+    }
+    struct usb_fs_complete complete = {0};
+    if (ioctl(dev->fd, USB_FS_COMPLETE, &complete) == 0) {
+        dev->in_pending = 0;
+        if (complete.ep_index != dev->in_index) return -1;
+        if (ep->status != USB_ERR_NORMAL_COMPLETION && ep->status != USB_ERR_SHORT_XFER) return 0;
+        uint32_t count = dev->fs_len[dev->in_index];
+        if (count > length) count = length;
+        memcpy(buffer, dev->rx_buf, count);
+        return (int)count;
+    }
+    if (errno != EBUSY && errno != ETIMEDOUT && errno != EAGAIN && errno != EWOULDBLOCK) return -1;
+    fd_set reads;
+    FD_ZERO(&reads);
+    FD_SET(dev->fd, &reads);
+    struct timeval wait = {0, 10000};
+    select(dev->fd + 1, &reads, NULL, NULL, &wait);
+    return 0;
+#endif
     uint32_t ask_len = length > 64 ? 64 : length;
     dev->fs_len[dev->in_index] = ask_len;
     ep->timeout = (uint16_t)timeout_ms;
@@ -330,6 +362,9 @@ static void *usb_reader_worker(void *arg)
     long last_led_time = 0;
     long last_log_t = 0;
     int consecutive_errors = 0;
+#ifdef PDP_ONLY
+    uint32_t last_buttons = UINT32_MAX;
+#endif
 
     log_line("usb_hotplug: Reader thread started for slot %d (%s on %s)",
              dev->slot, dev->name, dev->dev_path);
@@ -405,6 +440,14 @@ static void *usb_reader_worker(void *arg)
                 vpad_update(dev->slot, &st);
                 last_data_time = cur_time;
 
+#ifdef PDP_ONLY
+                if (st.buttons != last_buttons) {
+                    log_line("PDP: raw buttons=%02x%02x hat=%x -> PS buttons=0x%08x",
+                             report[1], report[0], report[2] & 0x0f, (unsigned)st.buttons);
+                    last_buttons = st.buttons;
+                }
+#endif
+
                 if (st.buttons != 0 && (cur_time - last_log_t > 300)) {
                     last_log_t = cur_time;
                     log_line("usb_hotplug: slot %d button press 0x%08x (LX=%d LY=%d)",
@@ -436,7 +479,9 @@ static void *usb_reader_worker(void *arg)
             }
         }
 
+#ifndef PDP_ONLY
         usleep(4000); /* ~250 Hz polling tick */
+#endif
     }
 
 

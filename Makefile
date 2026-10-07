@@ -2,14 +2,20 @@
 # Universal Controller Engine & Web Control Center for PS5 (FW 7.00 - 13.60)
 # Combines Bluetooth (AnyPad-PS5) + USB Hotplug (Ghostcontrol / PoorDS4) + ShellUI Fixes (YetAnotherControllerEnabler)
 
-PS5_HOST ?= 192.168.1.22
+PS5_HOST ?=
 PS5_PORT ?= 9021
 
 BUILD := build
 
-.PHONY: all ps5 send clean test host-test
+.PHONY: all pdp ps5 send clean test host-test
 
-all: ps5
+all: pdp
+
+pdp:
+ifndef PS5_PAYLOAD_SDK
+	$(error PS5_PAYLOAD_SDK is undefined. Please export PS5_PAYLOAD_SDK=/path/to/ps5-payload-sdk)
+endif
+	$(MAKE) -f pdp.mk
 
 ps5:
 ifndef PS5_PAYLOAD_SDK
@@ -17,10 +23,12 @@ ifndef PS5_PAYLOAD_SDK
 endif
 	$(MAKE) -f ps5.mk
 
-send: ps5
+send: pdp
+ifeq ($(strip $(PS5_HOST)),)
+	$(error Set PS5_HOST to your console's address)
+endif
 	@echo "[*] Sending payload to PS5 $(PS5_HOST):$(PS5_PORT)..."
-	nc -w 5 $(PS5_HOST) $(PS5_PORT) < dist/OmniPad-PS5-*.elf || \
-	python3 -c "import socket, glob; f=open(glob.glob('dist/OmniPad-PS5-*.elf')[0],'rb').read(); s=socket.create_connection(('$(PS5_HOST)', $(PS5_PORT)), timeout=5); s.sendall(f); s.close(); print('[+] Envio concluido!')"
+	python3 -c "import socket; f=open('dist/PDP-Faceoff-USB.elf','rb').read(); s=socket.create_connection(('$(PS5_HOST)', $(PS5_PORT)), timeout=5); s.sendall(f); s.close(); print('Payload sent')"
 
 test: host-test
 
